@@ -83,6 +83,9 @@ public:
     std::string unretract();
     std::string lift(LiftType lift_type = LiftType::NormalLift, bool spiral_vase = false);
     std::string unlift();
+    // Perform an immediate (non-lazy) Z lift using the current extruder's z_hop setting.
+    // Sets m_lifted so that subsequent lift() calls are no-ops and unlift() will restore Z.
+    std::string force_lift();
     const Vec3d& get_position() const { return m_pos; }
     Vec3d&       get_position() { return m_pos; }
     void        set_position(const Vec3d& in) { m_pos = in; }

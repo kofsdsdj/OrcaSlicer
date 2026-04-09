@@ -887,6 +887,21 @@ std::string GCodeWriter::unlift()
     return gcode;
 }
 
+std::string GCodeWriter::force_lift()
+{
+    if (m_extruder == nullptr)
+        return "";
+
+    double target_lift = this->config.z_hop.get_at(m_extruder->id());
+    if (target_lift > 0 && m_lifted == 0) {
+        m_lifted = target_lift;
+        // Clear any pending lazy lift to prevent double-lifting
+        m_to_lift = 0;
+        return this->_travel_to_z(m_pos(2) + target_lift, "lift Z before toolchange");
+    }
+    return "";
+}
+
 std::string GCodeWriter::set_fan(const GCodeFlavor gcode_flavor, unsigned int speed)
 {
     std::ostringstream gcode;

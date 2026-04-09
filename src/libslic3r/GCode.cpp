@@ -504,6 +504,13 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
         std::string toolchange_retract_str = gcodegen.retract(true, false);
         check_add_eol(toolchange_retract_str);
 
+        // Explicit Z lift before toolchange (T command).
+        // Convert any pending lazy lift to an immediate lift so the nozzle
+        // is physically raised before the tool is changed.
+        std::string force_lift_str = gcodegen.writer().force_lift();
+        check_add_eol(force_lift_str);
+        toolchange_retract_str += force_lift_str;
+
         // Process the custom change_filament_gcode. If it is empty, provide a simple Tn command to change the filament.
         // Otherwise, leave control to the user completely.
         std::string        toolchange_gcode_str;
@@ -616,13 +623,22 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
             }
 
             // move to start_pos for wiping after toolchange
+            // The nozzle is at lifted height; XY travel happens at lifted height.
             std::string start_pos_str;
             start_pos_str = gcodegen.travel_to(wipe_tower_point_to_object_point(gcodegen, start_pos + plate_origin_2d), erMixed,
                                                "Move to start pos");
             check_add_eol(start_pos_str);
             toolchange_gcode_str += start_pos_str;
 
-            // unretract before wiping
+            // Lower to wipe tower layer Z, then unretract before wiping.
+            // First explicitly lower Z to the wipe tower layer height,
+            // then unretract (unlift is a no-op after explicit travel_to_z).
+            if (gcodegen.writer().get_zhop() > 0) {
+                toolchange_gcode_str += gcodegen.writer().travel_to_z(z, "Lower to wipe tower layer Z", true);
+                Vec3d position{gcodegen.writer().get_position()};
+                position.z() = z;
+                gcodegen.writer().set_position(position);
+            }
             toolchange_gcode_str += gcodegen.unretract();
             check_add_eol(toolchange_gcode_str);
         }
@@ -767,9 +783,22 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
         if (tcr.priming || (new_extruder_id >= 0 && needs_toolchange)) {
             if (is_ramming)
                 gcodegen.m_wipe.reset_path();                                           // We don't want wiping on the ramming lines.
+
+            // Explicit retract + Z lift before toolchange (T command).
+            // This ensures the nozzle is lifted before the tool is changed,
+            // preventing oozing onto the print during toolchange.
+            gcode += gcodegen.retract(true, false);
+            gcode += gcodegen.writer().force_lift();
+
+            // Execute toolchange (T command) - nozzle is at lifted height.
+            // set_extruder's internal retract will be no-op since already retracted,
+            // and its internal lift will be no-op since m_lifted > 0.
             toolchange_gcode_str = gcodegen.set_extruder(new_extruder_id, tcr.print_z); // TODO: toolchange_z vs print_z
+
+            // After toolchange, lower to wipe tower layer Z and unretract.
+            // The nozzle stays at lifted height until we explicitly lower it here.
             if (gcodegen.config().enable_prime_tower) {
-                deretraction_str += gcodegen.writer().travel_to_z(z, "Force restore layer Z", true);
+                deretraction_str += gcodegen.writer().travel_to_z(z, "Lower to wipe tower layer Z", true);
                 Vec3d position{gcodegen.writer().get_position()};
                 position.z() = z;
                 gcodegen.writer().set_position(position);
